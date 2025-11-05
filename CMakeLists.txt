@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 4.0)
-project(network_monitor)
+project(network-monitor)
 
-set(CMAKE_CXX_STANDARD 20)
+set(SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
 
-add_executable(network_monitor main.cpp)
+add_executable(network-monitor ${SOURCES})
+target_compile_features(network-monitor
+        PRIVATE
+        cxx_std_11
+)

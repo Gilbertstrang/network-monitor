@@ -1,14 +1,17 @@
+#include <boost/asio.hpp>
+#include <boost/system/error_code.hpp>
+
 #include <iostream>
 
-// TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
-int main() {
-    auto lang = "C++";
-    std::cout << "Hello and welcome to " << lang << "!\n";
-
-    for (int i = 1; i <= 5; i++) {
-        std::cout << "i = " << i << std::endl;
+int main()
+{
+    // A 'falsey' error_code means "no error".
+    boost::system::error_code ec {};
+    if (ec) {
+        std::cerr << "Error: " << ec.message() << std::endl;
+        return -1;
+    } else {
+        std::cout << "OK" << std::endl;
+        return 0;
     }
-
-    return 0;
-    
 }

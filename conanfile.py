@@ -1,10 +1,17 @@
-from conans import ConanFile
+from conan import ConanFile
+from conan.tools.cmake import cmake_layout
 
-class ConanPackage(ConanFile):
-    name = 'network-monitor'
-    version = "2.22.1"
+class NetworkMonitorConan(ConanFile):
+    name = "network-monitor"
+    version = "0.1.0"
 
-    generators = 'cmake_find_package'
+    requires = "boost/1.83.0"
+    settings = "os", "arch", "compiler", "build_type"
+    generators = "CMakeDeps", "CMakeToolchain"
 
-    requires = [
-    ]
+    default_options = {
+        "boost/*:shared": False,
+    }
+
+    def layout(self):
+        cmake_layout(self)

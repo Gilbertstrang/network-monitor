@@ -9,69 +9,125 @@
 using tcp = boost::asio::ip::tcp;
 namespace websocket = boost::beast::websocket;
 
-void Log(const std::string& where, boost::system::error_code ec)
-{
+void Log(const std::string& where, boost::system::error_code ec) {
     std::cerr << "[" << std::setw(20) << where << "] "
               << (ec ? "Error: " : "OK")
               << (ec ? ec.message() : "")
               << std::endl;
 }
 
-int main()
-{
-
-    const std::string url {"ltnm.learncppthroughprojects.com"};
-    const std::string port {"80"};
-    const std::string message {"hello there"};
-
-
-    boost::asio::io_context ioc {};
-
-    tcp::socket socket {ioc};
-
-    boost::system::error_code ec {};
-    tcp::resolver resolver {ioc};
-    auto resolverIt {resolver.resolve(url, port, ec)};
+void OnReceive(
+    boost::beast::flat_buffer& rbuffer,
+    const boost::system::error_code& ec
+) {
     if (ec) {
-        Log("resolver.resolve", ec);
-        return -1;
-    }
-
-    socket.connect(*resolverIt, ec);
-    if (ec) {
-        Log("socket.connect", ec);
-        return -2;
-    }
-
-    websocket::stream<boost::beast::tcp_stream> ws {std::move(socket)};
-    ws.handshake(url, "/echo", ec);
-    if (ec) {
-        Log("ws.handshake", ec);
-        return -3;
-    }
-
-    ws.text(true); //exchange messages in text format
-
-    //sending message to the connected websocket server
-    boost::asio::const_buffer wbuffer {message.c_str(), message.size()};
-    ws.write(wbuffer, ec);
-    if (ec) {
-        Log("ws.write", ec);
-        return -4;
-    }
-
-    boost::beast::flat_buffer rbuffer {}; //read the message back
-    ws.read(rbuffer, ec);
-    if (ec) {
-        Log("ws.read", ec);
-        return 51;
+        Log("OnReceive", ec);
+        return;
     }
 
     std::cout << "ECHO: "
               << boost::beast::make_printable(rbuffer.data())
               << std::endl;
-    
 
-    Log("returning", ec);
+}
+
+void OnSend(
+    websocket::stream<boost::beast::tcp_stream>& ws,
+    boost::beast::flat_buffer& rBuffer,
+    const boost::system::error_code& ec
+) {
+    if (ec) {
+        Log("OnSend", ec);
+        return;
+    }
+
+    ws.async_read(rBuffer, [&rBuffer](auto ec, auto nBytesRead) {
+        OnReceive(rBuffer, ec);
+    });
+
+}
+
+void OnHandshake(
+    websocket::stream<boost::beast::tcp_stream>& ws,
+    const boost::asio::const_buffer& wBuffer,
+    boost::beast::flat_buffer& rBuffer,
+    const boost::system::error_code& ec
+) {
+    if (ec) {
+        Log("OnHandshake", ec);
+        return;
+    }
+
+    ws.text(true);
+
+    ws.async_write(wBuffer, [&ws, &rBuffer](auto ec, auto nBytesWritten) {
+        OnSend(ws, rBuffer, ec);
+    });
+}
+
+void OnConnect(
+    websocket::stream<boost::beast::tcp_stream>& ws,
+    const std::string& url,
+    const std::string& endpoint,
+    const boost::asio::const_buffer& wBuffer,
+    boost::beast::flat_buffer& rBuffer,
+    const boost::system::error_code& ec
+) {
+    if (ec) {
+        Log("OnConnect", ec);
+        return;
+    }
+
+    ws.async_handshake(url, endpoint, [&ws, &wBuffer, &rBuffer](auto ec) {
+        OnHandshake(ws, wBuffer, rBuffer, ec);
+    });
+}
+
+void OnResolve(
+    websocket::stream<boost::beast::tcp_stream>& ws,
+    const std::string& url,
+    const std::string& endpoint,
+    const boost::asio::const_buffer& wBuffer,
+    boost::beast::flat_buffer& rBuffer,
+    const boost::system::error_code& ec,
+    tcp::resolver::iterator resolverIt
+) {
+    if (ec) {
+        Log("OnResolve", ec);
+        return;
+    }
+
+    ws.next_layer().async_connect(*resolverIt, [&ws, &url, &endpoint, &wBuffer, &rBuffer](auto ec) {
+        OnConnect(ws, url, endpoint, wBuffer, rBuffer, ec);
+    });
+}
+
+
+int main()
+{
+
+    const std::string url {"ltnm.learncppthroughprojects.com"};
+    const std::string port {"80"};
+    const std::string endpoint {"/echo"};
+    const std::string message {"hello there"};
+
+
+    boost::asio::io_context ioc {};
+
+    websocket::stream<boost::beast::tcp_stream> ws {ioc};
+    boost::asio::const_buffer wBuffer {message.c_str(), message.size()};
+    boost::beast::flat_buffer rBuffer {};
+
+    tcp::resolver resolver {ioc};
+    resolver.async_resolve(url, port, [&ws, &url, &endpoint, &wBuffer, &rBuffer](auto ec, auto resolverIt) {
+        OnResolve(ws, url, endpoint, wBuffer, rBuffer, ec, resolverIt);
+    });
+    
+    ioc.run();
+    
+    if ((boost::beast::buffers_to_string(rBuffer.data()) != message)) {
+        return -1;
+    }
+    
     return 0;
 }

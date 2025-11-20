@@ -2,11 +2,14 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(network-monitor)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/generators")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_BINARY_DIR}/generators")
 if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/conaninfo.txt)
     list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 find_package(Boost 1.74 REQUIRED COMPONENTS system unit_test_framework)
+find_package(OpenSSL REQUIRED)
+find_package(Filesystem REQUIRED)
 
 enable_testing()
 
@@ -22,6 +25,7 @@ target_compile_features(network-monitor
 target_link_libraries(network-monitor
     PUBLIC
         Boost::boost
+        OpenSSL::SSL
 )
 target_include_directories(network-monitor
     PUBLIC
@@ -36,14 +40,21 @@ set(TESTS_SOURCES
 add_executable(network-monitor-tests ${TESTS_SOURCES})
 target_compile_features(network-monitor-tests
     PRIVATE
-        cxx_std_14
+        cxx_std_17
 )
 target_link_libraries(network-monitor-tests
     PRIVATE
         network-monitor
         Boost::boost
         Boost::unit_test_framework
+        std::filesystem
 )
+
+target_compile_definitions(network-monitor-tests
+    PRIVATE
+        TESTS_CACERT_PEM="${CMAKE_CURRENT_SOURCE_DIR}/tests/cacert.pem" 
+)
+
 
 add_test(
     NAME network-monitor-tests

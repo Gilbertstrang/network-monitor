@@ -8,6 +8,7 @@ if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/conaninfo.txt)
     list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 find_package(Boost 1.74 REQUIRED COMPONENTS system unit_test_framework)
+find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Filesystem REQUIRED)
 
@@ -15,17 +16,21 @@ enable_testing()
 
 set(LIB_SOURCES
     src/websocket-client.cpp
+    src/file-downloader.cpp
 )
 
 add_library(network-monitor STATIC ${LIB_SOURCES})
 target_compile_features(network-monitor
     PUBLIC
         cxx_std_14
+        
 )
 target_link_libraries(network-monitor
     PUBLIC
         Boost::boost
         OpenSSL::SSL
+    PRIVATE
+        CURL::libcurl
 )
 target_include_directories(network-monitor
     PUBLIC
@@ -35,6 +40,7 @@ target_include_directories(network-monitor
 set(TESTS_SOURCES
     tests/websocket-client.cpp
     tests/main.cpp
+    tests/file-downloader.cpp
 )
 
 add_executable(network-monitor-tests ${TESTS_SOURCES})

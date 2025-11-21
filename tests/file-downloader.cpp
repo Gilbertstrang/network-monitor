@@ -2,12 +2,14 @@
 
 #include <boost/asio.hpp>
 #include <boost/test/unit_test.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 using NetworkMonitor::DownloadFile;
+using NetworkMonitor::ParseJsonFile;
 
 BOOST_AUTO_TEST_SUITE(network_monitor);
 
@@ -42,8 +44,22 @@ BOOST_AUTO_TEST_CASE(file_downloader)
         BOOST_CHECK(foundExpectedString);
     }
 
-    // Clean up.
+    // Clean up
     std::filesystem::remove(destination);
+}
+
+BOOST_AUTO_TEST_CASE(parse_json) {
+    const std::filesystem::path source {TESTS_NETWORK_LAYOUT};
+    auto data = ParseJsonFile(source);
+
+    BOOST_CHECK(data.contains("lines"));
+    BOOST_CHECK(!data["lines"].empty());
+
+    BOOST_CHECK(data.contains("stations"));
+    BOOST_CHECK(!data["stations"].empty());
+
+    BOOST_CHECK(data.contains("travel_times"));
+    BOOST_CHECK(!data["travel_times"].empty());
 }
 
 BOOST_AUTO_TEST_SUITE_END();

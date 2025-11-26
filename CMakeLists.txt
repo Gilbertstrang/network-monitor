@@ -18,6 +18,7 @@ enable_testing()
 set(LIB_SOURCES
     src/websocket-client.cpp
     src/file-downloader.cpp
+    src/transport-network.cpp
 )
 
 add_library(network-monitor STATIC ${LIB_SOURCES})
@@ -43,6 +44,7 @@ set(TESTS_SOURCES
     tests/websocket-client.cpp
     tests/main.cpp
     tests/file-downloader.cpp
+    tests/transport-network.cpp
 )
 
 add_executable(network-monitor-tests ${TESTS_SOURCES})

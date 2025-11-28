@@ -20,7 +20,7 @@ bool Route::operator==(const Route& other) const {
 }
 
 TransportNetwork::TransportNetwork(const TransportNetwork& copied) = default;
-TransportNetwork::TransportNetwork(const TransportNetwork& moved) = default;
+TransportNetwork::TransportNetwork(TransportNetwork&& moved) = default;
 
 TransportNetwork& TransportNetwork::operator=(const TransportNetwork& copied) = default;
 TransportNetwork& TransportNetwork::operator=(TransportNetwork&& moved) = default;
@@ -39,7 +39,7 @@ bool TransportNetwork::AddStation(const Station& station) {
 }
 
 bool TransportNetwork::AddLine(const Line& line) {
-    if (lines_.count(line.id)) return false;
+    if (lines_.count(line.id) > 0) return false;
 
     for (size_t i = 0; i < line.routes.size(); ++i) {
         if (routes_.count(line.routes[i].id) > 0) return false;
@@ -99,7 +99,7 @@ std::vector<Id> TransportNetwork::GetRoutesServingStation(const Id& station) con
     for (const auto& route : routes_) {
         auto it = std::find(route.second.stops.begin(), route.second.stops.end(), station); //.second because it is a pair of id,route
         if (it != route.second.stops.end()) {
-            result.push_back(station);
+            result.push_back(route.first);
         }
     }
 
@@ -118,12 +118,14 @@ bool TransportNetwork::SetTravelTime(
     if (TransportNetwork::AreAdjacent(stationA, stationB)) {
         std::string key = TransportNetwork::MakeEdgeKey(stationA, stationB);
         travelTimes_[key] = travelTime;
+        return true;
     }
+    return false;
 }
 
 unsigned int TransportNetwork::GetTravelTime(const Id& stationA, const Id& stationB) const {
     if (stationA == stationB) return 0;
-    std:: string key = TransportNetwork::MakeEdgeKey(stationA, stationB);
+    std::string key = TransportNetwork::MakeEdgeKey(stationA, stationB);
     
     auto it = travelTimes_.find(key);
     if (it != travelTimes_.end()) {
@@ -142,7 +144,29 @@ unsigned int TransportNetwork::GetTravelTime(
     if (routes_.count(route) == 0) return 0;
     if (stationA == stationB) return 0;
 
-    //todo
+    const Route& r = routes_.at(route);
+
+    int idxA = -1, idxB = -1;
+
+    for (int i = 0; i < r.stops.size(); ++i) {
+        if (r.stops[i] == stationA) idxA = i;
+        if (r.stops[i] == stationB) idxB = i;
+    }
+
+    if (idxA >= idxB) return 0;
+
+    int sumTime = 0;
+
+    for (int i = idxA; i < idxB; ++i) {
+        Id cur = r.stops[i];
+        Id next = r.stops[i+1];
+        
+        sumTime += GetTravelTime(cur, next);
+        
+    }
+
+    return sumTime;
+
     
 }
 

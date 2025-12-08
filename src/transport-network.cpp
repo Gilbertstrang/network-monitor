@@ -1,5 +1,7 @@
 #include <network-monitor/transport-network.h>
 
+#include <algorithm>
+#include <nlohmann/json.hpp>
 
 namespace NetworkMonitor {
 
@@ -93,7 +95,7 @@ long long int TransportNetwork::GetPassengerCount(const Id& station) const {
 
 std::vector<Id> TransportNetwork::GetRoutesServingStation(const Id& station) const {
     std::vector<Id> result {};
-    
+
     if (stations_.count(station) == 0) return result;
 
     for (const auto& route : routes_) {
@@ -102,6 +104,8 @@ std::vector<Id> TransportNetwork::GetRoutesServingStation(const Id& station) con
             result.push_back(route.first);
         }
     }
+
+    std::sort(result.begin(), result.end());
 
     return result;
 
@@ -123,7 +127,9 @@ bool TransportNetwork::SetTravelTime(
     return false;
 }
 
-unsigned int TransportNetwork::GetTravelTime(const Id& stationA, const Id& stationB) const {
+unsigned int TransportNetwork::GetTravelTime(const Id& stationA,
+     const Id& stationB
+    ) const {
     if (stationA == stationB) return 0;
     std::string key = TransportNetwork::MakeEdgeKey(stationA, stationB);
     
@@ -169,6 +175,60 @@ unsigned int TransportNetwork::GetTravelTime(
 
     
 }
+
+bool TransportNetwork::FromJson(nlohmann::json&& src ) {
+
+    bool ok {true};
+
+    for (auto&& stationJson : src.at("stations")) {
+        Station sta {
+            std::move(stationJson.at("station_id").get<std::string>()),
+            std::move(stationJson.at("name").get<std::string>())
+        };
+
+        ok &= AddStation(sta);
+
+        if (!ok) {
+            throw nlohmann::json::other_error::create(501,"Couldnt add station " + sta.id, nullptr);
+        }
+    }
+
+    for (auto&& lineJson : src.at("lines")) {
+        Line line {
+            std::move(lineJson.at("line_id").get<std::string>()),
+            std::move(lineJson.at("name").get<std::string>())
+        };
+        line.routes.reserve(lineJson.at("routes").size());
+
+        for (auto&& routeJson : lineJson.at("routes")) {
+            line.routes.emplace_back(Route {
+                std::move(routeJson.at("route_id").get<std::string>()),
+                std::move(routeJson.at("direction").get<std::string>()),
+                std::move(routeJson.at("line_id").get<std::string>()),
+                std::move(routeJson.at("start_station_id").get<std::string>()),
+                std::move(routeJson.at("end_station_id").get<std::string>()),
+                std::move(routeJson.at("route_stops").get<std::vector<std::string>>())
+            });
+
+        }
+        
+        ok &= AddLine(line);
+        if (!ok) throw nlohmann::json::other_error::create(501, "Couldnt add line " + line.id, nullptr);
+    }
+
+
+    for (auto&& travelTimeJson : src.at("travel_times")) {
+        ok &= SetTravelTime(
+            std::move(travelTimeJson.at("start_station_id").get<std::string>()),
+            std::move(travelTimeJson.at("end_station_id").get<std::string>()),
+            std::move(travelTimeJson.at("travel_time").get<unsigned int>())
+        );
+    }
+
+    return ok;
+    
+}
+
 
 
 }

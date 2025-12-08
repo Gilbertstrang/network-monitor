@@ -1,6 +1,13 @@
+#ifndef NETWORK_MONITOR_TRANSPORT_NETWORK_H
+#define NETWORK_MONITOR_TRANSPORT_NETWORK_H
+
+
 #include <string>
 #include <vector>
 #include <unordered_map>
+
+#include <nlohmann/json.hpp>
+
 namespace NetworkMonitor {
 
 /*! \brief A station, line, or route ID.
@@ -237,6 +244,25 @@ public:
         const Id& stationB
     ) const;
 
+
+    /*! \brief Populate the network from a JSON object.
+     *
+     *  \param src Ownership of the source JSON object is moved to this method.
+     *
+     *  \returns false if stations and lines where parsed successfully, but not
+     *           the travel times.
+     *
+     *  \throws std::runtime_error This method throws if the JSON items were
+     *                             parsed correctly but there was an issue
+     *                             adding new stations or lines to the network.
+     *  \throws nlohmann::json::exception If there was a problem parsing the
+     *                                    JSON object.
+     */
+    bool FromJson(
+        nlohmann::json&& src
+    );
+
+
 private:
     
 
@@ -255,18 +281,18 @@ private:
 
     struct GraphNode {
         Id stationId;
-        std::string name;
+        std::string name {};
         long long int passengerCount {0};
-        std::vector<GraphEdge> edges;
+        std::vector<GraphEdge> edges {};
 
 
 
     };
 
-    std::unordered_map<Id, GraphNode> stations_;           //store stations by id
-    std::unordered_map<Id, Line> lines_;                 //store lines by id
-    std::unordered_map<Id, Route> routes_;               //store routes by id
-    std::unordered_map<Id, long long int> passengerCount_;   //passenger counts per station
+    std::unordered_map<Id, GraphNode> stations_;                //store stations by id
+    std::unordered_map<Id, Line> lines_;                        //store lines by id
+    std::unordered_map<Id, Route> routes_;                      //store routes by id
+    std::unordered_map<Id, long long int> passengerCount_;      //passenger counts per station
 
     std::unordered_map<std::string, unsigned int> travelTimes_;
 
@@ -297,3 +323,5 @@ private:
 };
 
 } // namespace NetworkMonitor
+
+#endif // NETWORK_MONITOR_TRANSPORT_NETWORK_H

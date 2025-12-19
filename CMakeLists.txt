@@ -16,7 +16,6 @@ find_package(nlohmann_json REQUIRED)
 enable_testing()
 
 set(LIB_SOURCES
-    src/websocket-client.cpp
     src/file-downloader.cpp
     src/transport-network.cpp
 )

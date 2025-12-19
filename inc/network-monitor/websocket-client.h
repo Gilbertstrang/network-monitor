@@ -8,9 +8,28 @@
 
 #include <string>
 #include <functional>
+#include <iomanip>
+#include <chrono>
+#include <iostream>
+#include <openssl/ssl.h>
 
 
 namespace NetworkMonitor {
+
+    /*! \brief Client to connect to a WebSocket server over TLS.
+    *
+    *  \tparam Resolver        The class to resolve the URL to an IP address. It
+    *                          must support the same interface of
+    *                          boost::asio::ip::tcp::resolver.
+    *  \tparam WebSocketStream The WebSocket stream class. It must support the
+    *                          same interface of boost::beast::websocket::stream.
+    */
+
+
+    template <
+        typename Resolver,
+        typename WebSocketStream
+    >
 
 /*! \brief Client to connect to a WebSocket server over secure TLS.
  */
@@ -34,11 +53,17 @@ public:
         const std::string& port,
         boost::asio::io_context& ioc,
         boost::asio::ssl::context& ctx
-    );
+    ): url_ {url},
+    endpoint_ {endpoint},
+    port_ {port},
+    resolver_ {boost::asio::make_strand(ioc)},
+    ws_ {boost::asio::make_strand(ioc), ctx}
+{
+}
 
     /*! \brief Destructor.
      */
-    ~WebSocketClient();
+    ~WebSocketClient() = default;
 
     /*! \brief Connect to the server.
      *
@@ -54,7 +79,19 @@ public:
         std::function<void (boost::system::error_code,
                             std::string&&)> onMessage = nullptr,
         std::function<void (boost::system::error_code)> onDisconnect = nullptr
-    );
+    ) {
+    onConnect_ = onConnect;
+    onMessage_ = onMessage;
+    onDisconnect_ = onDisconnect;
+
+    closed_ = false;
+    resolver_.async_resolve(url_, port_, [this](auto ec, auto resolverIt) {
+        OnResolve(ec, resolverIt);
+    });
+
+    
+
+}
 
     /*! \brief Send a text message to the WebSocket server.
      *
@@ -66,7 +103,13 @@ public:
     void Send(
         const std::string& message,
         std::function<void (boost::system::error_code)> onSend = nullptr
-    );
+    ) {
+    ws_.async_write(boost::asio::buffer(message), [onSend](auto ec, auto) {
+        if (onSend) {
+            onSend(ec);
+        }
+    });
+}
 
     /*! \brief Close the WebSocket connection.
      *
@@ -75,15 +118,22 @@ public:
      */
     void Close(
         std::function<void (boost::system::error_code)> onClose = nullptr
-    );
+    ) {
+    closed_ = true;
+    ws_.async_close(boost::beast::websocket::close_code::none, [onClose](auto ec) {
+        if (onClose) {
+            onClose(ec);
+        }
+    });
+}
 
 private:
     std::string url_ {};
     std::string endpoint_ {};
     std::string port_ {};
 
-    boost::asio::ip::tcp::resolver resolver_;
-    boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>> ws_;
+    Resolver resolver_;
+    WebSocketStream ws_;
     
 
     boost::beast::flat_buffer rBuffer_ {};
@@ -94,34 +144,149 @@ private:
     std::function<void (boost::system::error_code, std::string&&)> onMessage_ {nullptr};
     std::function<void (boost::system::error_code)> onDisconnect_ {nullptr};
 
+    static void Log(const std::string& where, boost::system::error_code ec) {
+        std::cerr << "[" << std::setw(20) << where << "] "
+                  << (ec ? "Error: " : "OK")
+                  << (ec ? ec.message() : "")
+                  << std::endl;
+}
+
     void OnResolve(
         const boost::system::error_code& ec,
         boost::asio::ip::tcp::resolver::iterator resolverIt
-    );
+    ) {
+    if (ec) {
+        Log("OnResolve", ec);
+        if (onConnect_) {
+            onConnect_(ec);
+        }
+        return;
+    }
+
+    boost::beast::get_lowest_layer(ws_).expires_after(std::chrono::seconds(5));
+
+    //connect to the TCP socket.
+    //TCP layer is the lowest layer (WebSocket -> TLS -> TCP)
+    boost::beast::get_lowest_layer(ws_).async_connect(*resolverIt, [this](auto ec) {
+        OnConnect(ec);
+    });
+}
 
     void OnConnect(
         const boost::system::error_code& ec
-    );
+    ) {
+    if (ec) {
+        Log("OnConnect", ec);
+        if (onConnect_) {
+            onConnect_(ec);
+        }
+        return;
+    }
+
+    boost::beast::get_lowest_layer(ws_).expires_never();
+    ws_.set_option(boost::beast::websocket::stream_base::timeout::suggested(boost::beast::role_type::client));
+
+    //client requirement. set the host name before TLS connection
+    SSL_set_tlsext_host_name(ws_.next_layer().native_handle(), url_.c_str());
+
+    // The TCP layer is the lowest layer (WebSocket -> TLS -> TCP).
+    //TLS handshake attempt
+    ws_.next_layer().async_handshake(
+        boost::asio::ssl::stream_base::client, 
+        [this](auto ec){
+            OnTlsHandshake(ec);
+        });
+
+}
 
      void OnTlsHandshake(
         const boost::system::error_code& ec
-    );
+    ) {
+
+    if (ec) {
+        Log("OnTlsHandshake", ec);
+        if (onConnect_) {
+            onConnect_(ec);
+            
+        }
+        return;
+    }
+
+    //websocket handshake attempt
+    ws_.async_handshake(url_, endpoint_, [this](auto ec){
+            OnHandshake(ec);
+        });
+    
+}
 
     void OnHandshake(
         const boost::system::error_code& ec
-    );
+    ) {
+    if (ec) {
+        Log("OnHandshake", ec);
+        if (onConnect_) {
+            onConnect_(ec);
+        }
+        return;
+    }
+
+    ws_.text(true); //exchange message int text format
+
+    ListenToIncomingMessage(ec); //since we are connected now, set a recursive async listener to receive msg
+
+    //dispatch the user callback
+    if (onConnect_) {
+        onConnect_(ec);
+    }
+
+}
 
     void ListenToIncomingMessage(
         const boost::system::error_code& ec
-    );
+    ) {
+    //stop processing messages if connection aborted
+    if (ec == boost::asio::error::operation_aborted) {
+        if (onDisconnect_ && ! closed_) { //check closed flag to avoid notifying user twice
+            onDisconnect_(ec);
+        }
+        return;
+    }
+
+    //read message async. on successful read process message
+    //and recursively called this again for next messages
+    ws_.async_read(rBuffer_, [this](auto ec, auto nBytes) {
+        OnRead(ec, nBytes);
+        ListenToIncomingMessage(ec);
+    });
+
+
+}
 
     void OnRead(
         const boost::system::error_code& ec,
         size_t nBytes
-    );
+    ) {
+    //ignore messages failed to read lmao
+    if (ec) {
+        return;
+    }
+    
+    std::string message {boost::beast::buffers_to_string(rBuffer_.data())};
+    rBuffer_.consume(nBytes);
+    if (onMessage_) {
+        onMessage_(ec, std::move(message));
+    }
+}
 
 
 };
+
+using BoostWebSocketClient = WebSocketClient<
+    boost::asio::ip::tcp::resolver,
+    boost::beast::websocket::stream<
+    boost::beast::ssl_stream<boost::beast::tcp_stream>
+    >
+>;
 
 } // namespace NetworkMonitor
 

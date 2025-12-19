@@ -6,7 +6,7 @@
 #include <string>
 #include <filesystem>
 
-using NetworkMonitor::WebSocketClient;
+using NetworkMonitor::BoostWebSocketClient;
 
 
 BOOST_AUTO_TEST_SUITE(network_monitor);
@@ -26,7 +26,7 @@ BOOST_AUTO_TEST_CASE(class_WebSocketClient) {
 
     boost::asio::io_context ioc {};
     
-    WebSocketClient client {url, endpoint, port, ioc, ctx};
+    BoostWebSocketClient client {url, endpoint, port, ioc, ctx};
 
     bool connected {false};
     bool messageSent {false};
@@ -89,7 +89,7 @@ BOOST_AUTO_TEST_CASE(send_stomp_frame) {
 
     boost::asio::io_context ioc {};
     
-    WebSocketClient client {url, endpoint, port, ioc, ctx};
+    BoostWebSocketClient client {url, endpoint, port, ioc, ctx};
 
     bool connected {false};
     bool messageSent {false};

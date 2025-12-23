@@ -1,4 +1,7 @@
+#include "boost-mock.h"
+
 #include <network-monitor/websocket-client.h>
+
 #include <boost/asio.hpp>
 #include <boost/test/unit_test.hpp>
 
@@ -7,27 +10,74 @@
 #include <filesystem>
 
 using NetworkMonitor::BoostWebSocketClient;
+using NetworkMonitor::MockResolver;
+using NetworkMonitor::TestWebSocketClient;
 
+// init mock properties
+struct WebSocketClientTestFixture {
+    WebSocketClientTestFixture() {
+        MockResolver::resolveEc = {};
+    }
+};
+
+using timeout = boost::unit_test::timeout; //timeout for connections that slow or that doesnt go anywhere..
 
 BOOST_AUTO_TEST_SUITE(network_monitor);
 
+BOOST_AUTO_TEST_SUITE(class_WebSocketClient);
 BOOST_AUTO_TEST_CASE(cacert_pem) {
     BOOST_CHECK(std::filesystem::exists(TESTS_CACERT_PEM));
 }
+BOOST_FIXTURE_TEST_SUITE(Connect, WebSocketClientTestFixture);
 
-BOOST_AUTO_TEST_CASE(class_WebSocketClient) {
-    const std::string url {"ltnm.learncppthroughprojects.com"};
+BOOST_AUTO_TEST_CASE(fail_resolve, *timeout {1}) {
+    //mock
+    const std::string url {"some.echo-server.com"};
     const std::string port {"443"};
-    const std::string endpoint {"/echo"};
-    const std::string message {"hello there"};
+    const std::string endpoint {"/"};
+
     boost::asio::ssl::context ctx{boost::asio::ssl::context::tlsv12_client};
 
     ctx.load_verify_file(TESTS_CACERT_PEM);
 
     boost::asio::io_context ioc {};
     
-    BoostWebSocketClient client {url, endpoint, port, ioc, ctx};
+    MockResolver::resolveEc = boost::asio::error::host_not_found;
 
+    TestWebSocketClient client {url, endpoint, port, ioc, ctx};
+
+    bool calledOnConnect {false};
+    auto onConnect {[&calledOnConnect](auto ec) {
+        calledOnConnect = true;
+        BOOST_CHECK_EQUAL(ec, boost::asio::error::host_not_found);
+    }};
+
+    client.Connect(onConnect);
+    ioc.run();
+
+    BOOST_CHECK(calledOnConnect);
+
+}
+
+BOOST_AUTO_TEST_SUITE_END(); //connect
+
+BOOST_AUTO_TEST_SUITE(live);
+
+
+BOOST_AUTO_TEST_CASE(echo, *timeout {20}) {
+    const std::string url {"ltnm.learncppthroughprojects.com"};
+    const std::string port {"443"};
+    const std::string endpoint {"/echo"};
+    const std::string message {"hello world"};
+
+    boost::asio::ssl::context ctx {boost::asio::ssl::context::tlsv12_client}; //TLS context
+    ctx.load_verify_file(TESTS_CACERT_PEM);
+
+    boost::asio::io_context ioc {};
+
+    BoostWebSocketClient client {url, endpoint, port, ioc, ctx}; //tested class
+
+    //flags
     bool connected {false};
     bool messageSent {false};
     bool messageReceived {false};
@@ -38,20 +88,25 @@ BOOST_AUTO_TEST_CASE(class_WebSocketClient) {
         messageSent = !ec;
     }};
 
-    auto onConnect {[&client, &connected, &onSend, &message](auto ec) {
+    auto onConnect {[&client, &connected, &onSend, &message](auto ec){
         connected = !ec;
-        if (!ec) client.Send(message, onSend);
+
+        if (!ec) {
+            client.Send(message, onSend);
+        }
     }};
 
     auto onClose {[&disconnected](auto ec) {
         disconnected = !ec;
     }};
 
-    auto onReceive {[&client, &onClose, &messageReceived, &echo](auto ec, auto received) {
+
+    auto onReceive {[&client, &onClose, &messageReceived, &echo](auto ec, auto received){
         messageReceived = !ec;
         echo = std::move(received);
         client.Close(onClose);
     }};
+
 
     client.Connect(onConnect, onReceive);
     ioc.run();
@@ -61,11 +116,18 @@ BOOST_AUTO_TEST_CASE(class_WebSocketClient) {
     BOOST_CHECK(messageReceived);
     BOOST_CHECK(disconnected);
     BOOST_CHECK_EQUAL(message, echo);
-
-
 }
 
-BOOST_AUTO_TEST_CASE(send_stomp_frame) {
+bool CheckResponse(const std::string& response) {
+
+    bool ok {true};
+    ok &= response.find("ERROR") != std::string::npos;
+    ok &= response.find("ValidationInvalidAuth") != std::string::npos;
+    return ok;
+}
+
+
+BOOST_AUTO_TEST_CASE(network_events, *timeout {3}) {
     const std::string url {"ltnm.learncppthroughprojects.com"};
     const std::string port {"443"};
     const std::string endpoint {"/network-events"};
@@ -96,15 +158,6 @@ BOOST_AUTO_TEST_CASE(send_stomp_frame) {
     bool messageReceived {false};
     bool disconnected {false};
     std::string serverError {};
-
-    auto CheckResponse {[](const std::string& response) {
-        // We do not parse the whole message. We only check that it contains some
-        // expected items.
-        bool ok {true};
-        ok &= response.find("ERROR") != std::string::npos;
-        ok &= response.find("ValidationInvalidAuth") != std::string::npos;
-        return ok;
-    }};
 
 
     auto onSend {[&messageSent](auto ec) {
@@ -138,5 +191,6 @@ BOOST_AUTO_TEST_CASE(send_stomp_frame) {
 
 
 }
-
-BOOST_AUTO_TEST_SUITE_END();
+BOOST_AUTO_TEST_SUITE_END(); //live
+BOOST_AUTO_TEST_SUITE_END(); //class_websocketclient
+BOOST_AUTO_TEST_SUITE_END(); //network_monitor

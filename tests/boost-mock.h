@@ -4,11 +4,55 @@
 #include <network-monitor/websocket-client.h>
 
 #include <boost/asio.hpp>
+#include <boost/beast.hpp>
 #include <boost/utility/string_view.hpp>
 
 
 namespace NetworkMonitor {
 
+/*! \brief Mock the TCP socket stream from Boost.Beast.
+ *
+ *  We do not mock all available methods — only the ones we are interested in
+ *  for testing.
+ */
+class MockTcpStream: public boost::beast::tcp_stream {
+public:
+    /*! \brief Inherit all constructors from the parent class.
+     */
+    using boost::beast::tcp_stream::tcp_stream;
+
+    /*! \brief Use this static member in a test to set the error code returned
+     *         by async_connect.
+     */
+    static boost::system::error_code connectEc;
+
+    /*! \brief Mock for tcp_stream::async_connect
+     */
+    template <typename ConnectHandler>
+    void async_connect(
+        endpoint_type type,
+        ConnectHandler&& handler
+    )
+    {
+        return boost::asio::async_initiate<
+            ConnectHandler,
+            void (boost::system::error_code)
+        >(
+            [](auto&& handler, auto stream) {
+                // Call the user callback.
+                boost::asio::post(
+                    stream->get_executor(),
+                    boost::beast::bind_handler(
+                        std::move(handler),
+                        MockTcpStream::connectEc
+                    )
+                );
+            },
+            handler,
+            this
+        );
+    }
+};
 
 /*! \brief mocks DNS resolver from Asio
 */
@@ -39,16 +83,31 @@ public:
         
         return boost::asio::async_initiate<
             ResolveHandler, void (const boost::system::error_code&, resolver::results_type)>(
-                [](auto&& handler, auto resolver) {
+                [](auto&& handler, auto resolver, auto host, auto service) {
                     if (MockResolver::resolveEc) {
                         boost::asio::post(
                             resolver->ctx_, 
                             boost::beast::bind_handler(std::move(handler), MockResolver::resolveEc, resolver::results_type {}));
                     } else {
-
+                        boost::asio::post(
+                            resolver->ctx_,
+                            boost::beast::bind_handler(
+                                std::move(handler),
+                                MockResolver::resolveEc,
+                                resolver::results_type::create(
+                                    boost::asio::ip::tcp::endpoint {
+                                        boost::asio::ip::make_address("127.0.0.1"), 
+                                        443
+                                    }, host, service
+                                )
+                            )
+                        );
                     }
                 },
-                handler, this
+                handler, 
+                this, 
+                host.to_string(), 
+                service.to_string()
             );
     }
 private:
@@ -59,7 +118,7 @@ private:
 
 // Out-of-line static member initialization
 inline boost::system::error_code MockResolver::resolveEc {};
-
+inline boost::system::error_code MockTcpStream::connectEc {};
 
 /*! \brief Type alias for the mocked WebSocketClient.
  *
@@ -67,9 +126,18 @@ inline boost::system::error_code MockResolver::resolveEc {};
  */
 using TestWebSocketClient = WebSocketClient<
     MockResolver, 
-    boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>>;
+    boost::beast::websocket::stream<boost::beast::ssl_stream<MockTcpStream>>>;
 
-
+// This overload is required by Boost.Beast when you define a custom stream.
+template <typename TeardownHandler>
+void async_teardown(
+    boost::beast::role_type role,
+    MockTcpStream& socket,
+    TeardownHandler&& handler
+)
+{
+    return;
+}
 
 } // namespace NetworkMonitor
 
